@@ -1,0 +1,338 @@
+{
+  "name": "Freshservice Reporting Agent (Unresolved, SLA, Aging)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "9a9e4ac3-4e7e-4dd8-9d98-2d73e7c9b101",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-1540, 260]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "3ff0ec58-77e1-4b0c-a95d-f40113e3a202",
+      "name": "Weekday Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1540, 460]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"freshservice_domain\": \"{{$env.FRESHSERVICE_DOMAIN}}\",\n  \"freshservice_api_key\": \"{{$env.FRESHSERVICE_API_KEY}}\",\n  \"output_dir\": \"{{$env.FRESHSERVICE_REPORT_OUTPUT_DIR || '/data/shared/reports'}}\",\n  \"report_date\": \"{{$now.toISODate()}}\"\n}"
+      },
+      "id": "e90d00a2-b560-4d84-8a88-62f550f6e303",
+      "name": "Set Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-1320, 360]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{'https://' + $json.freshservice_domain + '/api/v2/search/tickets'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Basic ' + Buffer.from($json.freshservice_api_key + ':X').toString('base64') }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "\"(status:2 OR status:3)\""
+            },
+            {
+              "name": "page",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0f2be5bc-b84a-4b01-9f67-f4b2c34f6404",
+      "name": "Get Unresolved Tickets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1080, 260]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{'https://' + $json.freshservice_domain + '/api/v2/search/tickets'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Basic ' + Buffer.from($json.freshservice_api_key + ':X').toString('base64') }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "\"sla_breached:true AND (status:2 OR status:3)\""
+            },
+            {
+              "name": "page",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "87bcbe6d-5f73-4fd6-85bc-dd8be1734f05",
+      "name": "Get SLA Breached Tickets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1080, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "const unresolved = ($items('Get Unresolved Tickets', 0, 0)[0]?.json?.results ?? []).map(r => r);\nconst breached = new Set(($items('Get SLA Breached Tickets', 0, 0)[0]?.json?.results ?? []).map(r => String(r.id)));\n\nconst now = new Date();\nconst statusMap = {\n  2: 'Open',\n  3: 'Pending',\n  4: 'Resolved',\n  5: 'Closed'\n};\n\nfunction agingBucket(days) {\n  if (days <= 2) return '0-2 days';\n  if (days <= 7) return '3-7 days';\n  if (days <= 14) return '8-14 days';\n  return '15+ days';\n}\n\nconst rows = unresolved.map((t) => {\n  const created = t.created_at ? new Date(t.created_at) : null;\n  const ageDays = created ? Math.max(0, Math.floor((now - created) / (1000 * 60 * 60 * 24))) : null;\n  const hasBreach = breached.has(String(t.id));\n\n  return {\n    ticket_id: t.id,\n    subject: t.subject ?? '',\n    status: statusMap[t.status] ?? String(t.status ?? ''),\n    priority: t.priority ?? '',\n    group_id: t.group_id ?? '',\n    agent_id: t.responder_id ?? '',\n    requester_id: t.requester_id ?? '',\n    created_at: t.created_at ?? '',\n    due_by: t.due_by ?? '',\n    fr_due_by: t.fr_due_by ?? '',\n    age_days: ageDays,\n    aging_bucket: ageDays === null ? 'unknown' : agingBucket(ageDays),\n    sla_breached: hasBreach ? 'yes' : 'no',\n    freshservice_url: t.display_id ? `https://${$json.freshservice_domain}/a/tickets/${t.display_id}` : ''\n  };\n});\n\nconst summary = {\n  generated_on: now.toISOString(),\n  unresolved_total: rows.length,\n  sla_breached_total: rows.filter(r => r.sla_breached === 'yes').length,\n  aging_0_2: rows.filter(r => r.aging_bucket === '0-2 days').length,\n  aging_3_7: rows.filter(r => r.aging_bucket === '3-7 days').length,\n  aging_8_14: rows.filter(r => r.aging_bucket === '8-14 days').length,\n  aging_15_plus: rows.filter(r => r.aging_bucket === '15+ days').length\n};\n\nreturn rows.map((row, index) => ({\n  json: {\n    ...row,\n    summary,\n    output_dir: $json.output_dir,\n    report_date: $json.report_date,\n    freshservice_domain: $json.freshservice_domain,\n    row_index: index + 1\n  }\n}));"
+      },
+      "id": "bc064a79-7d85-4302-8946-e43db42f8f06",
+      "name": "Normalize and Score Tickets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-840, 360]
+    },
+    {
+      "parameters": {
+        "mode": "wait"
+      },
+      "id": "f61b8fb3-6228-4faa-95e9-bfd4a6b66a7b",
+      "name": "Wait for Both Queries",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [-920, 360]
+    },
+    {
+      "parameters": {
+        "operation": "toFile",
+        "fileFormat": "xlsx",
+        "options": {}
+      },
+      "id": "1849b5ad-cb1f-4458-8cc0-4f8ae9f6d807",
+      "name": "Create Excel Report",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [-600, 260]
+    },
+    {
+      "parameters": {
+        "fileName": "={{ $json.output_dir + '/freshservice-unresolved-' + $json.report_date + '.xlsx' }}",
+        "dataPropertyName": "data"
+      },
+      "id": "65d8f8c0-8fd9-4d6a-b13b-8178dfa83d08",
+      "name": "Write Excel Report",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [-360, 260]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nif (!items.length) {\n  return [];\n}\n\nconst summary = items[0].json.summary;\nconst unresolvedRows = items\n  .sort((a, b) => (b.json.age_days ?? 0) - (a.json.age_days ?? 0))\n  .slice(0, 25)\n  .map((item, i) => `${i + 1}. #${item.json.ticket_id} | ${item.json.status} | ${item.json.age_days} days | SLA breached: ${item.json.sla_breached} | ${item.json.subject}`);\n\nconst report = [\n  'Freshservice Ticket Report',\n  `Generated On: ${summary.generated_on}`,\n  '',\n  'Summary',\n  `- Unresolved tickets: ${summary.unresolved_total}`,\n  `- SLA breached tickets: ${summary.sla_breached_total}`,\n  `- Aging 0-2 days: ${summary.aging_0_2}`,\n  `- Aging 3-7 days: ${summary.aging_3_7}`,\n  `- Aging 8-14 days: ${summary.aging_8_14}`,\n  `- Aging 15+ days: ${summary.aging_15_plus}`,\n  '',\n  'Top 25 Oldest Unresolved Tickets',\n  ...unresolvedRows\n].join('\\n');\n\nreturn [{\n  json: {\n    output_dir: items[0].json.output_dir,\n    report_date: items[0].json.report_date\n  },\n  binary: {\n    data: {\n      data: Buffer.from(report, 'utf8').toString('base64'),\n      mimeType: 'application/msword',\n      fileName: `freshservice-summary-${items[0].json.report_date}.doc`\n    }\n  }\n}];"
+      },
+      "id": "48bfc3d6-1755-4ed1-9080-071335955009",
+      "name": "Create Word Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-600, 460]
+    },
+    {
+      "parameters": {
+        "fileName": "={{ $binary.data.fileName ? ($json.output_dir + '/' + $binary.data.fileName) : ($json.output_dir + '/freshservice-summary-' + $json.report_date + '.doc') }}",
+        "dataPropertyName": "data"
+      },
+      "id": "d82f01d6-d6a5-499b-b764-f1cc314f270a",
+      "name": "Write Word Summary",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [-360, 460]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"ok\",\n  \"excel\": $json.output_dir + '/freshservice-unresolved-' + $json.report_date + '.xlsx',\n  \"word\": $json.output_dir + '/freshservice-summary-' + $json.report_date + '.doc'\n}"
+      },
+      "id": "053a93f4-f98c-41da-801f-a6b8739fe10a",
+      "name": "Done",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [-120, 360]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekday Schedule": {
+      "main": [
+        [
+          {
+            "node": "Set Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Config": {
+      "main": [
+        [
+          {
+            "node": "Get Unresolved Tickets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get SLA Breached Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Unresolved Tickets": {
+      "main": [
+        [
+          {
+            "node": "Wait for Both Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get SLA Breached Tickets": {
+      "main": [
+        [
+          {
+            "node": "Wait for Both Queries",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Wait for Both Queries": {
+      "main": [
+        [
+          {
+            "node": "Normalize and Score Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize and Score Tickets": {
+      "main": [
+        [
+          {
+            "node": "Create Excel Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Word Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Excel Report": {
+      "main": [
+        [
+          {
+            "node": "Write Excel Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Word Summary": {
+      "main": [
+        [
+          {
+            "node": "Write Word Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Excel Report": {
+      "main": [
+        [
+          {
+            "node": "Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Word Summary": {
+      "main": [
+        [
+          {
+            "node": "Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "6ac3687f-6ca7-4f2d-bfe8-823e16e6f9f0",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "freshservice-reporting-agent-template",
+  "tags": []
+}
