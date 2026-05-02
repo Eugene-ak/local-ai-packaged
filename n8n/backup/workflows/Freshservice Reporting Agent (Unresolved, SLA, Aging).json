@@ -1,0 +1,323 @@
+{
+  "name": "Freshservice Reporting Agent (Unresolved, SLA, Aging)",
+  "nodes": [
+    {
+      "parameters": {
+        "toRecipients": "eugene.amedior@margins-id.com",
+        "subject": "Ticket Report",
+        "bodyContent": "Excel sheet of unresolved tickets at the close of the week.",
+        "additionalFields": {
+          "attachments": {
+            "attachments": [
+              {
+                "binaryPropertyName": "data"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1456,
+        3280
+      ],
+      "id": "783324d0-3a84-4f96-99a8-9bd90fe5e9bc",
+      "name": "Send a message2",
+      "webhookId": "85562cf3-eff0-422d-8160-a857040626e0",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "KjJQTbEJGJRUjxz3",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toRecipients": "eugene.amedior@margins-id.com",
+        "subject": "Ticket Report",
+        "bodyContent": "Excel sheet of unresolved tickets at the close of the week.",
+        "additionalFields": {
+          "attachments": {
+            "attachments": [
+              {
+                "binaryPropertyName": "data"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1456,
+        3472
+      ],
+      "id": "6c9704e1-6fa9-4e70-92a3-4c32d07a4895",
+      "name": "Send a message3",
+      "webhookId": "85562cf3-eff0-422d-8160-a857040626e0",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "KjJQTbEJGJRUjxz3",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "0c0795c8-f193-4044-8aa5-4aaf777301f2",
+      "name": "Weekday Schedule1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -112,
+        3376
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"freshservice_domain\": \"{{$env.FRESHSERVICE_DOMAIN}}\",\n  \"freshservice_api_key\": \"{{$env.FRESHSERVICE_API_KEY}}\",\n  \"output_dir\": \"{{$env.FRESHSERVICE_REPORT_OUTPUT_DIR || '/data/shared/reports'}}\",\n  \"report_date\": \"{{$now.toISODate()}}\",\n  \"report_email_to\": \"{{$env.REPORT_EMAIL_TO || 'ops@example.com'}}\",\n  \"report_email_from\": \"{{$env.REPORT_EMAIL_FROM || 'n8n-reports@example.com'}}\"\n}",
+        "options": {}
+      },
+      "id": "2a1b13d5-83d9-42e8-86ce-ca8c078d10f0",
+      "name": "Set Config1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        112,
+        3376
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $('Set Config1').first().json;\nconst domain = config.freshservice_domain ?? $json.freshservice_domain;\nconst apiKey = config.freshservice_api_key ?? $json.freshservice_api_key;\n\nif (!domain) {\n  throw new Error('Missing freshservice_domain in Set Config');\n}\nif (!apiKey) {\n  throw new Error('Missing freshservice_api_key in Set Config');\n}\n\nconst authHeader = 'Basic ' + Buffer.from(`${apiKey}:X`).toString('base64');\n\nfunction isUnresolved(ticket) {\n  return [2, 3].includes(Number(ticket?.status));\n}\n\nasync function fetchAllTickets() {\n  const allTickets = [];\n  let page = 1;\n  const perPage = 100;\n\n  while (page <= 200) {\n    let payload;\n    try {\n      payload = await this.helpers.httpRequest({\n        method: 'GET',\n        url: `https://${domain}/api/v2/tickets`,\n        qs: {\n          per_page: perPage,\n          page\n        },\n        headers: {\n          Authorization: authHeader,\n          Accept: 'application/json'\n        },\n        json: true\n      });\n    } catch (error) {\n      throw new Error(`Freshservice tickets API failed on page ${page}: ${error.message}`);\n    }\n\n    const tickets = payload.tickets ?? payload.results ?? [];\n    allTickets.push(...tickets);\n\n    if (tickets.length < perPage) break;\n    page += 1;\n  }\n\n  return allTickets;\n}\n\nconst allTickets = await fetchAllTickets.call(this);\nconst unresolvedTickets = allTickets.filter(isUnresolved);\n\nreturn [{\n  json: {\n    tickets: unresolvedTickets\n  }\n}];"
+      },
+      "id": "fe392007-79e2-4ea0-b54b-167514c79a67",
+      "name": "Get Unresolved Tickets1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        3376
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $('Set Config1').first().json;\nconst domain = config.freshservice_domain ?? $json.freshservice_domain;\nconst apiKey = config.freshservice_api_key ?? $json.freshservice_api_key;\n\nif (!domain) {\n  throw new Error('Missing freshservice_domain in Set Config');\n}\nif (!apiKey) {\n  throw new Error('Missing freshservice_api_key in Set Config');\n}\n\nconst authHeader = 'Basic ' + Buffer.from(`${apiKey}:X`).toString('base64');\n\nfunction isUnresolved(ticket) {\n  return [2, 3].includes(Number(ticket?.status));\n}\n\nfunction hasSlaBreach(ticket) {\n  return Boolean(ticket?.sla_breached || ticket?.is_escalated || ticket?.fr_escalated || ticket?.escalated);\n}\n\nasync function fetchAllTickets() {\n  const allTickets = [];\n  let page = 1;\n  const perPage = 100;\n\n  while (page <= 200) {\n    let payload;\n    try {\n      payload = await this.helpers.httpRequest({\n        method: 'GET',\n        url: `https://${domain}/api/v2/tickets`,\n        qs: {\n          per_page: perPage,\n          page\n        },\n        headers: {\n          Authorization: authHeader,\n          Accept: 'application/json'\n        },\n        json: true\n      });\n    } catch (error) {\n      throw new Error(`Freshservice tickets API failed on page ${page}: ${error.message}`);\n    }\n\n    const tickets = payload.tickets ?? payload.results ?? [];\n    allTickets.push(...tickets);\n\n    if (tickets.length < perPage) break;\n    page += 1;\n  }\n\n  return allTickets;\n}\n\nconst allTickets = await fetchAllTickets.call(this);\nconst breachedUnresolved = allTickets.filter((ticket) => isUnresolved(ticket) && hasSlaBreach(ticket));\n\nreturn [{\n  json: {\n    tickets: breachedUnresolved\n  }\n}];"
+      },
+      "id": "8ba1f14f-7dc3-4789-ab5b-6e0d65b4a2a8",
+      "name": "Get SLA Breached Tickets1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        3376
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const unresolvedResponse = $items('Get Unresolved Tickets1', 0, 0)[0]?.json ?? {};\nconst config = $('Set Config1').first().json;\n\nconst domain = config.freshservice_domain ?? $json.freshservice_domain;\nconst apiKey = config.freshservice_api_key ?? $json.freshservice_api_key;\n\nif (!domain) {\n  throw new Error('Missing freshservice_domain in Set Config');\n}\nif (!apiKey) {\n  throw new Error('Missing freshservice_api_key in Set Config');\n}\n\nconst authHeader = 'Basic ' + Buffer.from(`${apiKey}:X`).toString('base64');\nconst unresolved = unresolvedResponse.tickets ?? unresolvedResponse.results ?? [];\n\nconst now = new Date();\nconst statusMap = {\n  2: 'Open',\n  3: 'Pending',\n  4: 'Resolved',\n  5: 'Closed'\n};\nconst priorityMap = {\n  1: 'Low',\n  2: 'Medium',\n  3: 'High',\n  4: 'Urgent'\n};\n\nconst groupCache = new Map();\nconst agentCache = new Map();\nconst requesterCache = new Map();\nconst companyCache = new Map();\n\nfunction agingBucket(days) {\n  if (days <= 2) return '0-2 days';\n  if (days <= 7) return '3-7 days';\n  if (days <= 14) return '8-14 days';\n  return '15+ days';\n}\n\nasync function fetchEntity(resource, id, entityKey) {\n  if (!id) {\n    return null;\n  }\n  try {\n    const payload = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `https://${domain}/api/v2/${resource}/${id}`,\n      headers: {\n        Authorization: authHeader,\n        Accept: 'application/json'\n      },\n      json: true\n    });\n    return payload?.[entityKey] ?? null;\n  } catch (error) {\n    return null;\n  }\n}\n\nasync function getGroupName(groupId) {\n  if (!groupId) return '';\n  const key = String(groupId);\n  if (groupCache.has(key)) return groupCache.get(key);\n  const group = await fetchEntity.call(this, 'groups', groupId, 'group');\n  const name = group?.name ?? `Group #${groupId}`;\n  groupCache.set(key, name);\n  return name;\n}\n\nasync function getAgentName(agentId) {\n  if (!agentId) return '';\n  const key = String(agentId);\n  if (agentCache.has(key)) return agentCache.get(key);\n  const agent = await fetchEntity.call(this, 'agents', agentId, 'agent');\n  const derivedName = agent?.name ?? agent?.contact?.name ?? [agent?.first_name, agent?.last_name].filter(Boolean).join(' ').trim();\n  const name = derivedName || `Agent #${agentId}`;\n  agentCache.set(key, name);\n  return name;\n}\n\nasync function getRequester(requesterId) {\n  if (!requesterId) return null;\n  const key = String(requesterId);\n  if (requesterCache.has(key)) return requesterCache.get(key);\n  let requester = await fetchEntity.call(this, 'requesters', requesterId, 'requester');\n  if (!requester) {\n    requester = await fetchEntity.call(this, 'contacts', requesterId, 'contact');\n  }\n  requesterCache.set(key, requester);\n  return requester;\n}\n\nasync function getCompanyName(companyId) {\n  if (!companyId) return '';\n  const key = String(companyId);\n  if (companyCache.has(key)) return companyCache.get(key);\n  const company = await fetchEntity.call(this, 'companies', companyId, 'company');\n  const name = company?.name ?? `Company #${companyId}`;\n  companyCache.set(key, name);\n  return name;\n}\n\nconst rows = [];\nfor (const t of unresolved) {\n  const created = t.created_at ? new Date(t.created_at) : null;\n  const ageDays = created ? Math.max(0, Math.floor((now - created) / (1000 * 60 * 60 * 24))) : null;\n  const hasFrSlaBreach = Boolean(t?.fr_escalated);\n  const hasResSlaBreach = Boolean(t?.sla_breached || t?.is_escalated || t?.escalated);\n\n  const requester = await getRequester.call(this, t.requester_id);\n  const groupName = await getGroupName.call(this, t.group_id);\n  const agentName = await getAgentName.call(this, t.responder_id);\n  const companyName = await getCompanyName.call(this, t.company_id ?? requester?.company_id);\n\n  rows.push({\n    ticket_id: t.id,\n    subject: t.subject ?? '',\n    status: statusMap[t.status] ?? String(t.status ?? ''),\n    priority: priorityMap[t.priority] ?? String(t.priority ?? ''),\n    group: groupName,\n    company: companyName,\n    agent: agentName,\n    requester: (requester?.name ?? requester?.contact?.name ?? [requester?.first_name, requester?.last_name].filter(Boolean).join(' ').trim()) || `Requester #${t.requester_id ?? ''}`,\n    created_at: t.created_at ?? '',\n    due_by: t.due_by ?? '',\n    fr_due_by: t.fr_due_by ?? '',\n    age_days: ageDays,\n    aging_bucket: ageDays === null ? 'unknown' : agingBucket(ageDays),\n    fr_sla_breach: hasFrSlaBreach ? 'yes' : 'no',\n    res_sla_breach: hasResSlaBreach ? 'yes' : 'no'\n  });\n}\n\nconst summary = {\n  generated_on: now.toISOString(),\n  unresolved_total: rows.length,\n  sla_breached_total: rows.filter((r) => r.fr_sla_breach === 'yes' || r.res_sla_breach === 'yes').length,\n  aging_0_2: rows.filter((r) => r.aging_bucket === '0-2 days').length,\n  aging_3_7: rows.filter((r) => r.aging_bucket === '3-7 days').length,\n  aging_8_14: rows.filter((r) => r.aging_bucket === '8-14 days').length,\n  aging_15_plus: rows.filter((r) => r.aging_bucket === '15+ days').length\n};\n\nreturn rows.map((row) => ({\n  json: {\n    ...row,\n    summary,\n    report_date: config.report_date\n  }\n}));"
+      },
+      "id": "6c0f6ca8-d96a-4154-8865-9f9c7846810a",
+      "name": "Normalize and Score Tickets1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        3376
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all();\n\nreturn rows.map((item) => ({\n  json: {\n    ticket_id: item.json.ticket_id ?? '',\n    subject: item.json.subject ?? '',\n    status: item.json.status ?? '',\n    priority: item.json.priority ?? '',\n    group: item.json.group ?? '',\n    company: item.json.company ?? '',\n    agent: item.json.agent ?? '',\n    requester: item.json.requester ?? '',\n    created_at: item.json.created_at ?? '',\n    due_by: item.json.due_by ?? '',\n    fr_due_by: item.json.fr_due_by ?? '',\n    age_days: item.json.age_days ?? '',\n    fr_sla_breach: item.json.fr_sla_breach ?? '',\n    res_sla_breach: item.json.res_sla_breach ?? ''\n  }\n}));"
+      },
+      "id": "caa68ff6-76db-483d-a3dd-0065e2bba986",
+      "name": "Prepare Excel Rows1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        3280
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "toFile",
+        "fileFormat": "xlsx",
+        "options": {}
+      },
+      "id": "cbec165f-b6fd-4837-a281-fb02127bdf92",
+      "name": "Create Excel Report1",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [
+        1232,
+        3280
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nif (!items.length) {\n  return [];\n}\n\nconst summary = items[0].json.summary;\nconst reportDate = items[0].json.report_date || new Date().toISOString().slice(0, 10);\n\nconst top25 = items\n  .sort((a, b) => (b.json.age_days ?? 0) - (a.json.age_days ?? 0))\n  .slice(0, 25);\n\nconst tableStyle = `\n  border-collapse: collapse;\n  width: 100%;\n  font-family: Calibri, Arial, sans-serif;\n  font-size: 11pt;\n`;\nconst thStyle = `\n  background-color: #1F4E79;\n  color: #ffffff;\n  border: 1px solid #000;\n  padding: 6px 8px;\n  text-align: left;\n`;\nconst tdStyle = `border: 1px solid #999; padding: 5px 8px;`;\nconst tdBreachedStyle = `border: 1px solid #999; padding: 5px 8px; background-color: #FFCCCC; color: #CC0000; font-weight: bold;`;\nconst tdAltStyle = `border: 1px solid #999; padding: 5px 8px; background-color: #F5F5F5;`;\n\nconst ticketRows = top25.map((item, i) => {\n  const t = item.json;\n  const isBreached = t.fr_sla_breach === 'yes' || t.res_sla_breach === 'yes';\n  const rowBg = i % 2 === 0 ? tdStyle : tdAltStyle;\n  const breachedCell = isBreached ? tdBreachedStyle : (i % 2 === 0 ? tdStyle : tdAltStyle);\n  return `<tr>\n    <td style=\"${rowBg}\">${i + 1}</td>\n    <td style=\"${rowBg}\">${t.ticket_id ?? ''}</td>\n    <td style=\"${rowBg}\">${escapeHtml(t.subject ?? '')}</td>\n    <td style=\"${rowBg}\">${t.status ?? ''}</td>\n    <td style=\"${rowBg}\">${t.priority ?? ''}</td>\n    <td style=\"${rowBg}\">${t.age_days ?? ''}</td>\n    <td style=\"${rowBg}\">${t.aging_bucket ?? ''}</td>\n    <td style=\"${breachedCell}\">${isBreached ? 'YES' : 'No'}</td>\n    <td style=\"${rowBg}\">${t.due_by ? t.due_by.slice(0, 10) : ''}</td>\n  </tr>`;\n}).join('\\n');\n\nfunction escapeHtml(str) {\n  return String(str)\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;');\n}\n\nconst html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>\n<head>\n  <meta charset='UTF-8'>\n  <title>Freshservice Ticket Report</title>\n  <!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View></w:WordDocument></xml><![endif]-->\n  <style>\n    body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; margin: 20px; }\n    h1 { color: #1F4E79; font-size: 18pt; }\n    h2 { color: #1F4E79; font-size: 14pt; margin-top: 20px; }\n    p { font-size: 10pt; color: #555; }\n    .summary-table { border-collapse: collapse; width: 320px; margin-bottom: 20px; font-family: Calibri, Arial, sans-serif; font-size: 11pt; }\n    .summary-table th { background-color: #2E75B6; color: #fff; border: 1px solid #000; padding: 6px 10px; text-align: left; }\n    .summary-table td { border: 1px solid #999; padding: 5px 10px; }\n    .summary-table tr:nth-child(even) td { background-color: #DEEAF1; }\n  </style>\n</head>\n<body>\n  <h1>Freshservice Ticket Report</h1>\n  <p>Generated on: ${summary.generated_on}</p>\n\n  <h2>Summary</h2>\n  <table class=\"summary-table\">\n    <thead><tr><th>Metric</th><th>Count</th></tr></thead>\n    <tbody>\n      <tr><td>Unresolved tickets</td><td>${summary.unresolved_total}</td></tr>\n      <tr><td>SLA breached tickets</td><td>${summary.sla_breached_total}</td></tr>\n      <tr><td>Aging 0-2 days</td><td>${summary.aging_0_2}</td></tr>\n      <tr><td>Aging 3-7 days</td><td>${summary.aging_3_7}</td></tr>\n      <tr><td>Aging 8-14 days</td><td>${summary.aging_8_14}</td></tr>\n      <tr><td>Aging 15+ days</td><td>${summary.aging_15_plus}</td></tr>\n    </tbody>\n  </table>\n\n  <h2>Top 25 Oldest Unresolved Tickets</h2>\n  <table style=\"${tableStyle}\">\n    <thead>\n      <tr>\n        <th style=\"${thStyle}\">#</th>\n        <th style=\"${thStyle}\">Ticket ID</th>\n        <th style=\"${thStyle}\">Subject</th>\n        <th style=\"${thStyle}\">Status</th>\n        <th style=\"${thStyle}\">Priority</th>\n        <th style=\"${thStyle}\">Age (days)</th>\n        <th style=\"${thStyle}\">Aging Bucket</th>\n        <th style=\"${thStyle}\">SLA Breached</th>\n        <th style=\"${thStyle}\">Due By</th>\n      </tr>\n    </thead>\n    <tbody>\n      ${ticketRows}\n    </tbody>\n  </table>\n</body>\n</html>`;\n\nreturn [{\n  json: {\n    report_date: reportDate\n  },\n  binary: {\n    data: {\n      data: Buffer.from(html, 'utf8').toString('base64'),\n      mimeType: 'application/msword',\n      fileName: `freshservice-summary-${reportDate}.doc`\n    }\n  }\n}];"
+      },
+      "id": "109bdc31-8901-4c39-969f-900b3ee21de8",
+      "name": "Create Word Summary1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1232,
+        3472
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "090d8911-e614-472a-bff0-87a4f27e4152",
+      "name": "Done1",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        3376
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Send a message2": {
+      "main": [
+        [
+          {
+            "node": "Done1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message3": {
+      "main": [
+        [
+          {
+            "node": "Done1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekday Schedule1": {
+      "main": [
+        [
+          {
+            "node": "Set Config1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Config1": {
+      "main": [
+        [
+          {
+            "node": "Get Unresolved Tickets1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Unresolved Tickets1": {
+      "main": [
+        [
+          {
+            "node": "Get SLA Breached Tickets1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get SLA Breached Tickets1": {
+      "main": [
+        [
+          {
+            "node": "Normalize and Score Tickets1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize and Score Tickets1": {
+      "main": [
+        [
+          {
+            "node": "Prepare Excel Rows1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create Word Summary1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Excel Rows1": {
+      "main": [
+        [
+          {
+            "node": "Create Excel Report1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Excel Report1": {
+      "main": [
+        [
+          {
+            "node": "Send a message2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Word Summary1": {
+      "main": [
+        [
+          {
+            "node": "Send a message3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "53e1071a-00b5-4180-9592-51b430686a29",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8182deda30c175392e424ef65523e7ebb51be9967561625864c5e76d89c65807"
+  },
+  "id": "0bbbIomTLkQR0IiS",
+  "tags": []
+}

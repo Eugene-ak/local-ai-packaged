@@ -2,12 +2,28 @@
   "name": "Freshservice Reporting Agent (Unresolved, SLA, Aging)",
   "nodes": [
     {
-      "parameters": {},
-      "id": "9a9e4ac3-4e7e-4dd8-9d98-2d73e7c9b101",
-      "name": "Manual Trigger",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
-      "position": [-1540, 260]
+      "parameters": {
+        "toRecipients": "eugene.amedior@margins-id.com",
+        "subject": "=Freshservice Ticket Reports (Excel + Word) - {{ $('Set Config1').first().json.report_date }}",
+        "bodyContent": "=Please find attached the Freshservice unresolved tickets reports for {{ $('Set Config1').first().json.report_date }}.\n\nAttachments:\n- Excel: Full ticket list with all fields\n- Word: Summary report with key metrics and top 25 oldest tickets",
+        "additionalFields": {
+          "attachments": {
+            "attachments": [
+              {
+                "binaryPropertyName": "excel"
+              },
+              {
+                "binaryPropertyName": "word"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [1456, 3280],
+      "id": "783324d0-3a84-4f96-99a8-9bd90fe5e9bc",
+      "name": "Send a message2"
     },
     {
       "parameters": {
@@ -20,118 +36,63 @@
           ]
         }
       },
-      "id": "3ff0ec58-77e1-4b0c-a95d-f40113e3a202",
-      "name": "Weekday Schedule",
+      "id": "0c0795c8-f193-4044-8aa5-4aaf777301f2",
+      "name": "Weekday Schedule1",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [-1540, 460]
+      "position": [-112, 3376]
     },
     {
       "parameters": {
         "mode": "raw",
-        "jsonOutput": "={\n  \"freshservice_domain\": \"{{$env.FRESHSERVICE_DOMAIN}}\",\n  \"freshservice_api_key\": \"{{$env.FRESHSERVICE_API_KEY}}\",\n  \"output_dir\": \"{{$env.FRESHSERVICE_REPORT_OUTPUT_DIR || '/data/shared/reports'}}\",\n  \"report_date\": \"{{$now.toISODate()}}\"\n}"
+        "jsonOutput": "={\n  \"freshservice_domain\": \"{{$env.FRESHSERVICE_DOMAIN}}\",\n  \"freshservice_api_key\": \"{{$env.FRESHSERVICE_API_KEY}}\",\n  \"output_dir\": \"{{$env.FRESHSERVICE_REPORT_OUTPUT_DIR || \u0027/data/shared/reports\u0027}}\",\n  \"report_date\": \"{{$now.toISODate()}}\",\n  \"report_email_to\": \"{{$env.REPORT_EMAIL_TO || \u0027ops@example.com\u0027}}\",\n  \"report_email_from\": \"{{$env.REPORT_EMAIL_FROM || \u0027n8n-reports@example.com\u0027}}\"\n}",
+        "options": {}
       },
-      "id": "e90d00a2-b560-4d84-8a88-62f550f6e303",
-      "name": "Set Config",
+      "id": "2a1b13d5-83d9-42e8-86ce-ca8c078d10f0",
+      "name": "Set Config1",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [-1320, 360]
+      "position": [112, 3376]
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{'https://' + $json.freshservice_domain + '/api/v2/search/tickets'}}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "={{ 'Basic ' + Buffer.from($json.freshservice_api_key + ':X').toString('base64') }}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "query",
-              "value": "\"(status:2 OR status:3)\""
-            },
-            {
-              "name": "page",
-              "value": "1"
-            }
-          ]
-        },
-        "options": {}
+        "jsCode": "const config = $(\u0027Set Config1\u0027).first().json;\nconst domain = config.freshservice_domain ?? $json.freshservice_domain;\nconst apiKey = config.freshservice_api_key ?? $json.freshservice_api_key;\n\nif (!domain) {\n  throw new Error(\u0027Missing freshservice_domain in Set Config\u0027);\n}\nif (!apiKey) {\n  throw new Error(\u0027Missing freshservice_api_key in Set Config\u0027);\n}\n\nconst authHeader = \u0027Basic \u0027 + Buffer.from(`${apiKey}:X`).toString(\u0027base64\u0027);\n\nfunction isUnresolved(ticket) {\n  return [2, 3].includes(Number(ticket?.status));\n}\n\nasync function fetchAllTickets() {\n  const allTickets = [];\n  let page = 1;\n  const perPage = 100;\n\n  while (page \u003c= 200) {\n    let payload;\n    try {\n      payload = await this.helpers.httpRequest({\n        method: \u0027GET\u0027,\n        url: `https://${domain}/api/v2/tickets`,\n        qs: {\n          per_page: perPage,\n          page\n        },\n        headers: {\n          Authorization: authHeader,\n          Accept: \u0027application/json\u0027\n        },\n        json: true\n      });\n    } catch (error) {\n      throw new Error(`Freshservice tickets API failed on page ${page}: ${error.message}`);\n    }\n\n    const tickets = payload.tickets ?? payload.results ?? [];\n    allTickets.push(...tickets);\n\n    if (tickets.length \u003c perPage) break;\n    page += 1;\n  }\n\n  return allTickets;\n}\n\nconst allTickets = await fetchAllTickets.call(this);\nconst unresolvedTickets = allTickets.filter(isUnresolved);\n\nreturn [{\n  json: {\n    tickets: unresolvedTickets\n  }\n}];"
       },
-      "id": "0f2be5bc-b84a-4b01-9f67-f4b2c34f6404",
-      "name": "Get Unresolved Tickets",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [-1080, 260]
-    },
-    {
-      "parameters": {
-        "method": "GET",
-        "url": "={{'https://' + $json.freshservice_domain + '/api/v2/search/tickets'}}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "={{ 'Basic ' + Buffer.from($json.freshservice_api_key + ':X').toString('base64') }}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "query",
-              "value": "\"sla_breached:true AND (status:2 OR status:3)\""
-            },
-            {
-              "name": "page",
-              "value": "1"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "87bcbe6d-5f73-4fd6-85bc-dd8be1734f05",
-      "name": "Get SLA Breached Tickets",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [-1080, 460]
-    },
-    {
-      "parameters": {
-        "jsCode": "const unresolved = ($items('Get Unresolved Tickets', 0, 0)[0]?.json?.results ?? []).map(r => r);\nconst breached = new Set(($items('Get SLA Breached Tickets', 0, 0)[0]?.json?.results ?? []).map(r => String(r.id)));\n\nconst now = new Date();\nconst statusMap = {\n  2: 'Open',\n  3: 'Pending',\n  4: 'Resolved',\n  5: 'Closed'\n};\n\nfunction agingBucket(days) {\n  if (days <= 2) return '0-2 days';\n  if (days <= 7) return '3-7 days';\n  if (days <= 14) return '8-14 days';\n  return '15+ days';\n}\n\nconst rows = unresolved.map((t) => {\n  const created = t.created_at ? new Date(t.created_at) : null;\n  const ageDays = created ? Math.max(0, Math.floor((now - created) / (1000 * 60 * 60 * 24))) : null;\n  const hasBreach = breached.has(String(t.id));\n\n  return {\n    ticket_id: t.id,\n    subject: t.subject ?? '',\n    status: statusMap[t.status] ?? String(t.status ?? ''),\n    priority: t.priority ?? '',\n    group_id: t.group_id ?? '',\n    agent_id: t.responder_id ?? '',\n    requester_id: t.requester_id ?? '',\n    created_at: t.created_at ?? '',\n    due_by: t.due_by ?? '',\n    fr_due_by: t.fr_due_by ?? '',\n    age_days: ageDays,\n    aging_bucket: ageDays === null ? 'unknown' : agingBucket(ageDays),\n    sla_breached: hasBreach ? 'yes' : 'no',\n    freshservice_url: t.display_id ? `https://${$json.freshservice_domain}/a/tickets/${t.display_id}` : ''\n  };\n});\n\nconst summary = {\n  generated_on: now.toISOString(),\n  unresolved_total: rows.length,\n  sla_breached_total: rows.filter(r => r.sla_breached === 'yes').length,\n  aging_0_2: rows.filter(r => r.aging_bucket === '0-2 days').length,\n  aging_3_7: rows.filter(r => r.aging_bucket === '3-7 days').length,\n  aging_8_14: rows.filter(r => r.aging_bucket === '8-14 days').length,\n  aging_15_plus: rows.filter(r => r.aging_bucket === '15+ days').length\n};\n\nreturn rows.map((row, index) => ({\n  json: {\n    ...row,\n    summary,\n    output_dir: $json.output_dir,\n    report_date: $json.report_date,\n    freshservice_domain: $json.freshservice_domain,\n    row_index: index + 1\n  }\n}));"
-      },
-      "id": "bc064a79-7d85-4302-8946-e43db42f8f06",
-      "name": "Normalize and Score Tickets",
+      "id": "fe392007-79e2-4ea0-b54b-167514c79a67",
+      "name": "Get Unresolved Tickets1",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-840, 360]
+      "position": [336, 3376]
     },
     {
       "parameters": {
-        "mode": "wait"
+        "jsCode": "const config = $(\u0027Set Config1\u0027).first().json;\nconst domain = config.freshservice_domain ?? $json.freshservice_domain;\nconst apiKey = config.freshservice_api_key ?? $json.freshservice_api_key;\n\nif (!domain) {\n  throw new Error(\u0027Missing freshservice_domain in Set Config\u0027);\n}\nif (!apiKey) {\n  throw new Error(\u0027Missing freshservice_api_key in Set Config\u0027);\n}\n\nconst authHeader = \u0027Basic \u0027 + Buffer.from(`${apiKey}:X`).toString(\u0027base64\u0027);\n\nfunction isUnresolved(ticket) {\n  return [2, 3].includes(Number(ticket?.status));\n}\n\nfunction hasSlaBreach(ticket) {\n  return Boolean(ticket?.sla_breached || ticket?.is_escalated || ticket?.fr_escalated || ticket?.escalated);\n}\n\nasync function fetchAllTickets() {\n  const allTickets = [];\n  let page = 1;\n  const perPage = 100;\n\n  while (page \u003c= 200) {\n    let payload;\n    try {\n      payload = await this.helpers.httpRequest({\n        method: \u0027GET\u0027,\n        url: `https://${domain}/api/v2/tickets`,\n        qs: {\n          per_page: perPage,\n          page\n        },\n        headers: {\n          Authorization: authHeader,\n          Accept: \u0027application/json\u0027\n        },\n        json: true\n      });\n    } catch (error) {\n      throw new Error(`Freshservice tickets API failed on page ${page}: ${error.message}`);\n    }\n\n    const tickets = payload.tickets ?? payload.results ?? [];\n    allTickets.push(...tickets);\n\n    if (tickets.length \u003c perPage) break;\n    page += 1;\n  }\n\n  return allTickets;\n}\n\nconst allTickets = await fetchAllTickets.call(this);\nconst breachedUnresolved = allTickets.filter((ticket) =\u003e isUnresolved(ticket) \u0026\u0026 hasSlaBreach(ticket));\n\nreturn [{\n  json: {\n    tickets: breachedUnresolved\n  }\n}];"
       },
-      "id": "f61b8fb3-6228-4faa-95e9-bfd4a6b66a7b",
-      "name": "Wait for Both Queries",
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3.2,
-      "position": [-920, 360]
+      "id": "8ba1f14f-7dc3-4789-ab5b-6e0d65b4a2a8",
+      "name": "Get SLA Breached Tickets1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 3376]
+    },
+    {
+      "parameters": {
+        "jsCode": "const unresolvedResponse = $items(\u0027Get Unresolved Tickets1\u0027, 0, 0)[0]?.json ?? {};\nconst config = $(\u0027Set Config1\u0027).first().json;\n\nconst domain = config.freshservice_domain ?? $json.freshservice_domain;\nconst apiKey = config.freshservice_api_key ?? $json.freshservice_api_key;\n\nif (!domain) {\n  throw new Error(\u0027Missing freshservice_domain in Set Config\u0027);\n}\nif (!apiKey) {\n  throw new Error(\u0027Missing freshservice_api_key in Set Config\u0027);\n}\n\nconst authHeader = \u0027Basic \u0027 + Buffer.from(`${apiKey}:X`).toString(\u0027base64\u0027);\nconst unresolved = unresolvedResponse.tickets ?? unresolvedResponse.results ?? [];\n\nconst now = new Date();\nconst statusMap = {\n  2: \u0027Open\u0027,\n  3: \u0027Pending\u0027,\n  4: \u0027Resolved\u0027,\n  5: \u0027Closed\u0027\n};\nconst priorityMap = {\n  1: \u0027Low\u0027,\n  2: \u0027Medium\u0027,\n  3: \u0027High\u0027,\n  4: \u0027Urgent\u0027\n};\n\nconst groupCache = new Map();\nconst agentCache = new Map();\nconst requesterCache = new Map();\nconst companyCache = new Map();\n\nfunction agingBucket(days) {\n  if (days \u003c= 2) return \u00270-2 days\u0027;\n  if (days \u003c= 7) return \u00273-7 days\u0027;\n  if (days \u003c= 14) return \u00278-14 days\u0027;\n  return \u002715+ days\u0027;\n}\n\nasync function fetchEntity(resource, id, entityKey) {\n  if (!id) {\n    return null;\n  }\n  try {\n    const payload = await this.helpers.httpRequest({\n      method: \u0027GET\u0027,\n      url: `https://${domain}/api/v2/${resource}/${id}`,\n      headers: {\n        Authorization: authHeader,\n        Accept: \u0027application/json\u0027\n      },\n      json: true\n    });\n    return payload?.[entityKey] ?? null;\n  } catch (error) {\n    return null;\n  }\n}\n\nasync function getGroupName(groupId) {\n  if (!groupId) return \u0027\u0027;\n  const key = String(groupId);\n  if (groupCache.has(key)) return groupCache.get(key);\n  const group = await fetchEntity.call(this, \u0027groups\u0027, groupId, \u0027group\u0027);\n  const name = group?.name ?? `Group #${groupId}`;\n  groupCache.set(key, name);\n  return name;\n}\n\nasync function getAgentName(agentId) {\n  if (!agentId) return \u0027\u0027;\n  const key = String(agentId);\n  if (agentCache.has(key)) return agentCache.get(key);\n  const agent = await fetchEntity.call(this, \u0027agents\u0027, agentId, \u0027agent\u0027);\n  const derivedName = agent?.name ?? agent?.contact?.name ?? [agent?.first_name, agent?.last_name].filter(Boolean).join(\u0027 \u0027).trim();\n  const name = derivedName || `Agent #${agentId}`;\n  agentCache.set(key, name);\n  return name;\n}\n\nasync function getRequester(requesterId) {\n  if (!requesterId) return null;\n  const key = String(requesterId);\n  if (requesterCache.has(key)) return requesterCache.get(key);\n  let requester = await fetchEntity.call(this, \u0027requesters\u0027, requesterId, \u0027requester\u0027);\n  if (!requester) {\n    requester = await fetchEntity.call(this, \u0027contacts\u0027, requesterId, \u0027contact\u0027);\n  }\n  requesterCache.set(key, requester);\n  return requester;\n}\n\nasync function getCompanyName(companyId) {\n  if (!companyId) return \u0027\u0027;\n  const key = String(companyId);\n  if (companyCache.has(key)) return companyCache.get(key);\n  const company = await fetchEntity.call(this, \u0027companies\u0027, companyId, \u0027company\u0027);\n  const name = company?.name ?? `Company #${companyId}`;\n  companyCache.set(key, name);\n  return name;\n}\n\nconst rows = [];\nfor (const t of unresolved) {\n  const created = t.created_at ? new Date(t.created_at) : null;\n  const ageDays = created ? Math.max(0, Math.floor((now - created) / (1000 * 60 * 60 * 24))) : null;\n  const hasFrSlaBreach = Boolean(t?.fr_escalated);\n  const hasResSlaBreach = Boolean(t?.sla_breached || t?.is_escalated || t?.escalated);\n\n  const requester = await getRequester.call(this, t.requester_id);\n  const groupName = await getGroupName.call(this, t.group_id);\n  const agentName = await getAgentName.call(this, t.responder_id);\n  const companyName = await getCompanyName.call(this, t.company_id ?? requester?.company_id);\n\n  rows.push({\n    ticket_id: t.id,\n    subject: t.subject ?? \u0027\u0027,\n    status: statusMap[t.status] ?? String(t.status ?? \u0027\u0027),\n    priority: priorityMap[t.priority] ?? String(t.priority ?? \u0027\u0027),\n    group: groupName,\n    company: companyName,\n    agent: agentName,\n    requester: (requester?.name ?? requester?.contact?.name ?? [requester?.first_name, requester?.last_name].filter(Boolean).join(\u0027 \u0027).trim()) || `Requester #${t.requester_id ?? \u0027\u0027}`,\n    created_at: t.created_at ?? \u0027\u0027,\n    due_by: t.due_by ?? \u0027\u0027,\n    fr_due_by: t.fr_due_by ?? \u0027\u0027,\n    age_days: ageDays,\n    aging_bucket: ageDays === null ? \u0027unknown\u0027 : agingBucket(ageDays),\n    fr_sla_breach: hasFrSlaBreach ? \u0027yes\u0027 : \u0027no\u0027,\n    res_sla_breach: hasResSlaBreach ? \u0027yes\u0027 : \u0027no\u0027\n  });\n}\n\nconst summary = {\n  generated_on: now.toISOString(),\n  unresolved_total: rows.length,\n  sla_breached_total: rows.filter((r) =\u003e r.fr_sla_breach === \u0027yes\u0027 || r.res_sla_breach === \u0027yes\u0027).length,\n  aging_0_2: rows.filter((r) =\u003e r.aging_bucket === \u00270-2 days\u0027).length,\n  aging_3_7: rows.filter((r) =\u003e r.aging_bucket === \u00273-7 days\u0027).length,\n  aging_8_14: rows.filter((r) =\u003e r.aging_bucket === \u00278-14 days\u0027).length,\n  aging_15_plus: rows.filter((r) =\u003e r.aging_bucket === \u002715+ days\u0027).length\n};\n\nreturn rows.map((row) =\u003e ({\n  json: {\n    ...row,\n    summary,\n    report_date: config.report_date\n  }\n}));"
+      },
+      "id": "6c0f6ca8-d96a-4154-8865-9f9c7846810a",
+      "name": "Normalize and Score Tickets1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [784, 3376]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all();\n\nreturn rows.map((item) =\u003e ({\n  json: {\n    ticket_id: item.json.ticket_id ?? \u0027\u0027,\n    subject: item.json.subject ?? \u0027\u0027,\n    status: item.json.status ?? \u0027\u0027,\n    priority: item.json.priority ?? \u0027\u0027,\n    group: item.json.group ?? \u0027\u0027,\n    company: item.json.company ?? \u0027\u0027,\n    agent: item.json.agent ?? \u0027\u0027,\n    requester: item.json.requester ?? \u0027\u0027,\n    created_at: item.json.created_at ?? \u0027\u0027,\n    due_by: item.json.due_by ?? \u0027\u0027,\n    fr_due_by: item.json.fr_due_by ?? \u0027\u0027,\n    age_days: item.json.age_days ?? \u0027\u0027,\n    fr_sla_breach: item.json.fr_sla_breach ?? \u0027\u0027,\n    res_sla_breach: item.json.res_sla_breach ?? \u0027\u0027\n  }\n}));"
+      },
+      "id": "caa68ff6-76db-483d-a3dd-0065e2bba986",
+      "name": "Prepare Excel Rows1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1008, 3280]
     },
     {
       "parameters": {
@@ -139,185 +100,126 @@
         "fileFormat": "xlsx",
         "options": {}
       },
-      "id": "1849b5ad-cb1f-4458-8cc0-4f8ae9f6d807",
-      "name": "Create Excel Report",
+      "id": "cbec165f-b6fd-4837-a281-fb02127bdf92",
+      "name": "Create Excel Report1",
       "type": "n8n-nodes-base.spreadsheetFile",
       "typeVersion": 2,
-      "position": [-600, 260]
+      "position": [1232, 3280]
     },
     {
       "parameters": {
-        "fileName": "={{ $json.output_dir + '/freshservice-unresolved-' + $json.report_date + '.xlsx' }}",
-        "dataPropertyName": "data"
+        "jsCode": "const excelInput = $input.first();\nconst excelBinary = excelInput?.binary?.data;\nif (!excelBinary) {\n  throw new Error(\u0027Missing Excel binary from Create Excel Report1\u0027);\n}\n\nconst rowsInput = $items(\u0027Normalize and Score Tickets1\u0027, 0, 0) ?? [];\nif (!rowsInput.length) {\n  return [];\n}\n\nconst rows = rowsInput.map((item) =\u003e item.json);\nconst summary = rows[0].summary;\nconst reportDate = rows[0].report_date || new Date().toISOString().slice(0, 10);\n\nconst top25 = rows\n  .sort((a, b) =\u003e (b.age_days ?? 0) - (a.age_days ?? 0))\n  .slice(0, 25);\n\nconst tableStyle = `\n  border-collapse: collapse;\n  width: 100%;\n  font-family: Calibri, Arial, sans-serif;\n  font-size: 11pt;\n`;\nconst thStyle = `\n  background-color: #1F4E79;\n  color: #ffffff;\n  border: 1px solid #000;\n  padding: 6px 8px;\n  text-align: left;\n`;\nconst tdStyle = `border: 1px solid #999; padding: 5px 8px;`;\nconst tdBreachedStyle = `border: 1px solid #999; padding: 5px 8px; background-color: #FFCCCC; color: #CC0000; font-weight: bold;`;\nconst tdAltStyle = `border: 1px solid #999; padding: 5px 8px; background-color: #F5F5F5;`;\n\nconst ticketRows = top25.map((t, i) =\u003e {\n  const isBreached = t.fr_sla_breach === \u0027yes\u0027 || t.res_sla_breach === \u0027yes\u0027;\n  const rowBg = i % 2 === 0 ? tdStyle : tdAltStyle;\n  const breachedCell = isBreached ? tdBreachedStyle : rowBg;\n  return `\u003ctr\u003e\n    \u003ctd style=\"${rowBg}\"\u003e${i + 1}\u003c/td\u003e\n    \u003ctd style=\"${rowBg}\"\u003e${t.ticket_id ?? \u0027\u0027}\u003c/td\u003e\n    \u003ctd style=\"${rowBg}\"\u003e${escapeHtml(t.subject ?? \u0027\u0027)}\u003c/td\u003e\n    \u003ctd style=\"${rowBg}\"\u003e${t.status ?? \u0027\u0027}\u003c/td\u003e\n    \u003ctd style=\"${rowBg}\"\u003e${t.priority ?? \u0027\u0027}\u003c/td\u003e\n    \u003ctd style=\"${rowBg}\"\u003e${t.age_days ?? \u0027\u0027}\u003c/td\u003e\n    \u003ctd style=\"${rowBg}\"\u003e${t.aging_bucket ?? \u0027\u0027}\u003c/td\u003e\n    \u003ctd style=\"${breachedCell}\"\u003e${isBreached ? \u0027YES\u0027 : \u0027No\u0027}\u003c/td\u003e\n    \u003ctd style=\"${rowBg}\"\u003e${t.due_by ? t.due_by.slice(0, 10) : \u0027\u0027}\u003c/td\u003e\n  \u003c/tr\u003e`;\n}).join(\u0027\\n\u0027);\n\nfunction escapeHtml(str) {\n  return String(str)\n    .replace(/\u0026/g, \u0027\u0026amp;\u0027)\n    .replace(/\u003c/g, \u0027\u0026lt;\u0027)\n    .replace(/\u003e/g, \u0027\u0026gt;\u0027)\n    .replace(/\"/g, \u0027\u0026quot;\u0027);\n}\n\nconst html = `\u003chtml xmlns:o=\u0027urn:schemas-microsoft-com:office:office\u0027 xmlns:w=\u0027urn:schemas-microsoft-com:office:word\u0027 xmlns=\u0027http://www.w3.org/TR/REC-html40\u0027\u003e\n\u003chead\u003e\n  \u003cmeta charset=\u0027UTF-8\u0027\u003e\n  \u003ctitle\u003eFreshservice Ticket Report\u003c/title\u003e\n  \u003c!--[if gte mso 9]\u003e\u003cxml\u003e\u003cw:WordDocument\u003e\u003cw:View\u003ePrint\u003c/w:View\u003e\u003c/w:WordDocument\u003e\u003c/xml\u003e\u003c![endif]--\u003e\n  \u003cstyle\u003e\n    body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; margin: 20px; }\n    h1 { color: #1F4E79; font-size: 18pt; }\n    h2 { color: #1F4E79; font-size: 14pt; margin-top: 20px; }\n    p { font-size: 10pt; color: #555; }\n    .summary-table { border-collapse: collapse; width: 320px; margin-bottom: 20px; font-family: Calibri, Arial, sans-serif; font-size: 11pt; }\n    .summary-table th { background-color: #2E75B6; color: #fff; border: 1px solid #000; padding: 6px 10px; text-align: left; }\n    .summary-table td { border: 1px solid #999; padding: 5px 10px; }\n    .summary-table tr:nth-child(even) td { background-color: #DEEAF1; }\n  \u003c/style\u003e\n\u003c/head\u003e\n\u003cbody\u003e\n  \u003ch1\u003eFreshservice Ticket Report\u003c/h1\u003e\n  \u003cp\u003eGenerated on: ${summary.generated_on}\u003c/p\u003e\n\n  \u003ch2\u003eSummary\u003c/h2\u003e\n  \u003ctable class=\"summary-table\"\u003e\n    \u003cthead\u003e\u003ctr\u003e\u003cth\u003eMetric\u003c/th\u003e\u003cth\u003eCount\u003c/th\u003e\u003c/tr\u003e\u003c/thead\u003e\n    \u003ctbody\u003e\n      \u003ctr\u003e\u003ctd\u003eUnresolved tickets\u003c/td\u003e\u003ctd\u003e${summary.unresolved_total}\u003c/td\u003e\u003c/tr\u003e\n      \u003ctr\u003e\u003ctd\u003eSLA breached tickets\u003c/td\u003e\u003ctd\u003e${summary.sla_breached_total}\u003c/td\u003e\u003c/tr\u003e\n      \u003ctr\u003e\u003ctd\u003eAging 0-2 days\u003c/td\u003e\u003ctd\u003e${summary.aging_0_2}\u003c/td\u003e\u003c/tr\u003e\n      \u003ctr\u003e\u003ctd\u003eAging 3-7 days\u003c/td\u003e\u003ctd\u003e${summary.aging_3_7}\u003c/td\u003e\u003c/tr\u003e\n      \u003ctr\u003e\u003ctd\u003eAging 8-14 days\u003c/td\u003e\u003ctd\u003e${summary.aging_8_14}\u003c/td\u003e\u003c/tr\u003e\n      \u003ctr\u003e\u003ctd\u003eAging 15+ days\u003c/td\u003e\u003ctd\u003e${summary.aging_15_plus}\u003c/td\u003e\u003c/tr\u003e\n    \u003c/tbody\u003e\n  \u003c/table\u003e\n\n  \u003ch2\u003eTop 25 Oldest Unresolved Tickets\u003c/h2\u003e\n  \u003ctable style=\"${tableStyle}\"\u003e\n    \u003cthead\u003e\n      \u003ctr\u003e\n        \u003cth style=\"${thStyle}\"\u003e#\u003c/th\u003e\n        \u003cth style=\"${thStyle}\"\u003eTicket ID\u003c/th\u003e\n        \u003cth style=\"${thStyle}\"\u003eSubject\u003c/th\u003e\n        \u003cth style=\"${thStyle}\"\u003eStatus\u003c/th\u003e\n        \u003cth style=\"${thStyle}\"\u003ePriority\u003c/th\u003e\n        \u003cth style=\"${thStyle}\"\u003eAge (days)\u003c/th\u003e\n        \u003cth style=\"${thStyle}\"\u003eAging Bucket\u003c/th\u003e\n        \u003cth style=\"${thStyle}\"\u003eSLA Breached\u003c/th\u003e\n        \u003cth style=\"${thStyle}\"\u003eDue By\u003c/th\u003e\n      \u003c/tr\u003e\n    \u003c/thead\u003e\n    \u003ctbody\u003e\n      ${ticketRows}\n    \u003c/tbody\u003e\n  \u003c/table\u003e\n\u003c/body\u003e\n\u003c/html\u003e`;\n\nreturn [{\n  json: {\n    report_date: reportDate\n  },\n  binary: {\n    excel: excelBinary,\n    word: {\n      data: Buffer.from(html, \u0027utf8\u0027).toString(\u0027base64\u0027),\n      mimeType: \u0027application/msword\u0027,\n      fileName: `freshservice-summary-${reportDate}.doc`\n    }\n  }\n}];"
       },
-      "id": "65d8f8c0-8fd9-4d6a-b13b-8178dfa83d08",
-      "name": "Write Excel Report",
-      "type": "n8n-nodes-base.writeBinaryFile",
-      "typeVersion": 1,
-      "position": [-360, 260]
-    },
-    {
-      "parameters": {
-        "jsCode": "const items = $input.all();\nif (!items.length) {\n  return [];\n}\n\nconst summary = items[0].json.summary;\nconst unresolvedRows = items\n  .sort((a, b) => (b.json.age_days ?? 0) - (a.json.age_days ?? 0))\n  .slice(0, 25)\n  .map((item, i) => `${i + 1}. #${item.json.ticket_id} | ${item.json.status} | ${item.json.age_days} days | SLA breached: ${item.json.sla_breached} | ${item.json.subject}`);\n\nconst report = [\n  'Freshservice Ticket Report',\n  `Generated On: ${summary.generated_on}`,\n  '',\n  'Summary',\n  `- Unresolved tickets: ${summary.unresolved_total}`,\n  `- SLA breached tickets: ${summary.sla_breached_total}`,\n  `- Aging 0-2 days: ${summary.aging_0_2}`,\n  `- Aging 3-7 days: ${summary.aging_3_7}`,\n  `- Aging 8-14 days: ${summary.aging_8_14}`,\n  `- Aging 15+ days: ${summary.aging_15_plus}`,\n  '',\n  'Top 25 Oldest Unresolved Tickets',\n  ...unresolvedRows\n].join('\\n');\n\nreturn [{\n  json: {\n    output_dir: items[0].json.output_dir,\n    report_date: items[0].json.report_date\n  },\n  binary: {\n    data: {\n      data: Buffer.from(report, 'utf8').toString('base64'),\n      mimeType: 'application/msword',\n      fileName: `freshservice-summary-${items[0].json.report_date}.doc`\n    }\n  }\n}];"
-      },
-      "id": "48bfc3d6-1755-4ed1-9080-071335955009",
-      "name": "Create Word Summary",
+      "id": "109bdc31-8901-4c39-969f-900b3ee21de8",
+      "name": "Create Word Summary1",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-600, 460]
+      "position": [1232, 3472]
     },
     {
-      "parameters": {
-        "fileName": "={{ $binary.data.fileName ? ($json.output_dir + '/' + $binary.data.fileName) : ($json.output_dir + '/freshservice-summary-' + $json.report_date + '.doc') }}",
-        "dataPropertyName": "data"
-      },
-      "id": "d82f01d6-d6a5-499b-b764-f1cc314f270a",
-      "name": "Write Word Summary",
-      "type": "n8n-nodes-base.writeBinaryFile",
-      "typeVersion": 1,
-      "position": [-360, 460]
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={\n  \"status\": \"ok\",\n  \"excel\": $json.output_dir + '/freshservice-unresolved-' + $json.report_date + '.xlsx',\n  \"word\": $json.output_dir + '/freshservice-summary-' + $json.report_date + '.doc'\n}"
-      },
-      "id": "053a93f4-f98c-41da-801f-a6b8739fe10a",
-      "name": "Done",
+      "parameters": {},
+      "id": "090d8911-e614-472a-bff0-87a4f27e4152",
+      "name": "Done1",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [-120, 360]
+      "position": [1680, 3376]
     }
   ],
   "pinData": {},
   "connections": {
-    "Manual Trigger": {
+    "Send a message2": {
       "main": [
         [
           {
-            "node": "Set Config",
+            "node": "Done1",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Weekday Schedule": {
+    "Weekday Schedule1": {
       "main": [
         [
           {
-            "node": "Set Config",
+            "node": "Set Config1",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Set Config": {
+    "Set Config1": {
       "main": [
         [
           {
-            "node": "Get Unresolved Tickets",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Get SLA Breached Tickets",
+            "node": "Get Unresolved Tickets1",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Get Unresolved Tickets": {
+    "Get Unresolved Tickets1": {
       "main": [
         [
           {
-            "node": "Wait for Both Queries",
+            "node": "Get SLA Breached Tickets1",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Get SLA Breached Tickets": {
+    "Get SLA Breached Tickets1": {
       "main": [
         [
           {
-            "node": "Wait for Both Queries",
-            "type": "main",
-            "index": 1
-          }
-        ]
-      ]
-    },
-    "Wait for Both Queries": {
-      "main": [
-        [
-          {
-            "node": "Normalize and Score Tickets",
+            "node": "Normalize and Score Tickets1",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Normalize and Score Tickets": {
+    "Normalize and Score Tickets1": {
       "main": [
         [
           {
-            "node": "Create Excel Report",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Create Word Summary",
+            "node": "Prepare Excel Rows1",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Create Excel Report": {
+    "Prepare Excel Rows1": {
       "main": [
         [
           {
-            "node": "Write Excel Report",
+            "node": "Create Excel Report1",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Create Word Summary": {
+    "Create Excel Report1": {
       "main": [
         [
           {
-            "node": "Write Word Summary",
+            "node": "Create Word Summary1",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Write Excel Report": {
+    "Create Word Summary1": {
       "main": [
         [
           {
-            "node": "Done",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Write Word Summary": {
-      "main": [
-        [
-          {
-            "node": "Done",
+            "node": "Send a message2",
             "type": "main",
             "index": 0
           }
@@ -327,12 +229,13 @@
   },
   "active": false,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "binaryMode": "separate"
   },
-  "versionId": "6ac3687f-6ca7-4f2d-bfe8-823e16e6f9f0",
+  "versionId": "53e1071a-00b5-4180-9592-51b430686a29",
   "meta": {
     "templateCredsSetupCompleted": false
   },
-  "id": "freshservice-reporting-agent-template",
+  "id": "0bbbIomTLkQR0IiS",
   "tags": []
 }

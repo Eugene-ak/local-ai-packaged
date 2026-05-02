@@ -1,0 +1,331 @@
+{
+  "name": "Image Processing and Generation Chat Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "options": {}
+      },
+      "id": "0dbad925-a53d-4799-9367-4df4569928e1",
+      "name": "When chat message received",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [-900, 200]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "image-chat-agent",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "6dbd2dd3-e50a-4f6e-a142-7334dc2ceb8f",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-900, 380],
+      "webhookId": "image-chat-agent-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body ?? {};\nconst firstBinaryKey = $binary ? Object.keys($binary)[0] : undefined;\n\nlet imageBase64 = (\n  $json.image_base64 ??\n  body.image_base64 ??\n  $json.imageBase64 ??\n  body.imageBase64 ??\n  ''\n).toString().trim();\n\nif (!imageBase64 && firstBinaryKey) {\n  const imageBuffer = await this.helpers.getBinaryDataBuffer(0, firstBinaryKey);\n  imageBase64 = imageBuffer.toString('base64');\n}\n\nconst prompt = (\n  $json.chatInput ??\n  body.chatInput ??\n  body.prompt ??\n  $json.prompt ??\n  ''\n).toString().trim();\n\nconst explicitMode = (\n  $json.mode ??\n  body.mode ??\n  ''\n).toString().toLowerCase().trim();\n\nconst mode = explicitMode || (imageBase64 ? 'describe' : 'generate');\n\nreturn [{\n  json: {\n    prompt,\n    mode,\n    image_base64: imageBase64,\n    ollama_host: (body.ollama_host ?? $json.ollama_host ?? 'http://ollama:11434').toString(),\n    vision_model: (body.vision_model ?? $json.vision_model ?? 'llava:7b').toString(),\n    image_gen_url: (body.image_gen_url ?? $json.image_gen_url ?? 'https://api.openai.com/v1/images/generations').toString(),\n    image_gen_api_key: (body.image_gen_api_key ?? $json.image_gen_api_key ?? '').toString(),\n    image_gen_model: (body.image_gen_model ?? $json.image_gen_model ?? 'gpt-image-1').toString(),\n    image_size: (body.image_size ?? $json.image_size ?? '1024x1024').toString()\n  }\n}];"
+      },
+      "id": "8377151e-a53c-4b4b-8d20-e1b5db4cc26a",
+      "name": "Parse Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-540, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "describe",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "generate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": 2
+        }
+      },
+      "id": "f0fdc22c-f97a-4fab-8be9-9500f9da9699",
+      "name": "Mode Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [-300, 300]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Parse Request').first().json.prompt }}",
+        "options": {
+          "systemMessage": "You are an image-description agent. Your job is to prepare and optimize the user prompt for visual analysis. Keep your output concise and directly useful for describing an uploaded image."
+        }
+      },
+      "id": "d51c9d90-35e8-4023-8b2f-f5d2d83f1f41",
+      "name": "Describe Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [-40, 140]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Parse Request').first().json.prompt }}",
+        "options": {
+          "systemMessage": "You are an image-generation agent. Improve the user's creative prompt for high-quality image generation while preserving intent. Output concise guidance only."
+        }
+      },
+      "id": "49dc71d2-c6dc-4110-bb62-73f9df2d5d16",
+      "name": "Generate Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [-40, 360]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "qwen2.5:7b-instruct-q4_K_M",
+          "mode": "list",
+          "cachedResultName": "qwen2.5:7b-instruct-q4_K_M"
+        },
+        "options": {}
+      },
+      "id": "a4aa5196-44ad-4dc0-89d3-4fe59ff1a82d",
+      "name": "Agent LLM (Ollama via OpenAI)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [-200, 520],
+      "credentials": {
+        "openAiApi": {
+          "id": "yjDbkWOXNXC959ei",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const req = $('Parse Request').first().json;\n\nif (!req.prompt) {\n  throw new Error('Missing prompt. Provide chatInput or prompt.');\n}\n\nif (!req.image_base64) {\n  throw new Error('Describe mode requires image_base64 or an uploaded image binary file.');\n}\n\nconst visionResponse = await this.helpers.httpRequest({\n  method: 'POST',\n  url: `${req.ollama_host}/api/chat`,\n  headers: {\n    'Content-Type': 'application/json'\n  },\n  body: {\n    model: req.vision_model,\n    stream: false,\n    messages: [\n      {\n        role: 'user',\n        content: req.prompt,\n        images: [req.image_base64]\n      }\n    ]\n  },\n  json: true\n});\n\nconst description = visionResponse?.message?.content || 'No description returned.';\n\nreturn [{\n  json: {\n    mode: 'describe',\n    provider: 'ollama',\n    model: req.vision_model,\n    output: description,\n    text: description\n  }\n}];"
+      },
+      "id": "91ff428e-66bc-4ce9-a5ea-b9eb2db63d14",
+      "name": "Describe Image",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-40, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const req = $('Parse Request').first().json;\n\nif (!req.prompt) {\n  throw new Error('Missing prompt. Provide chatInput or prompt.');\n}\n\nconst headers = {\n  'Content-Type': 'application/json'\n};\n\nif (req.image_gen_api_key) {\n  headers.Authorization = `Bearer ${req.image_gen_api_key}`;\n}\n\nconst generationResponse = await this.helpers.httpRequest({\n  method: 'POST',\n  url: req.image_gen_url,\n  headers,\n  body: {\n    model: req.image_gen_model,\n    prompt: req.prompt,\n    size: req.image_size\n  },\n  json: true\n});\n\nconst firstImage = generationResponse?.data?.[0] ?? {};\nconst imageUrl = firstImage.url ?? '';\nconst imageB64 = firstImage.b64_json ?? '';\n\nlet outputText = 'Image generated.';\nif (imageUrl) {\n  outputText = `Image generated: ${imageUrl}`;\n} else if (imageB64) {\n  outputText = 'Image generated successfully. b64_json returned in image_base64.';\n}\n\nreturn [{\n  json: {\n    mode: 'generate',\n    provider: 'openai-compatible',\n    model: req.image_gen_model,\n    output: outputText,\n    text: outputText,\n    image_url: imageUrl,\n    image_base64: imageB64\n  }\n}];"
+      },
+      "id": "411ccd2c-b8cb-4ac0-8118-d2674cce0a68",
+      "name": "Generate Image",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-40, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "throw new Error(`Unsupported mode: ${$json.mode}. Use describe or generate.`);"
+      },
+      "id": "6d7d235d-54cd-4ecf-a7d9-e9b1f45f8c2e",
+      "name": "Unsupported Mode",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-40, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $json;\nconst text = data.text || data.output || 'Done';\n\nif (data.mode === 'generate' && data.image_base64) {\n  return [{\n    json: {\n      ...data,\n      text\n    },\n    binary: {\n      generated_image: {\n        data: data.image_base64,\n        fileName: 'generated-image.png',\n        mimeType: 'image/png'\n      }\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ...data,\n    text\n  }\n}];"
+      },
+      "id": "4ab7ffb1-f3ab-4497-9655-16d499e03d12",
+      "name": "Format Final Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "content": "## Image Chat Agent\n\n### Modes\n- **describe**: provide an image (uploaded binary or `image_base64`) + prompt\n- **generate**: provide a text prompt\n\n### Optional config fields in request body\n- `ollama_host` (default: `http://ollama:11434`)\n- `vision_model` (default: `llava:13b`)\n- `image_gen_url` (default OpenAI images endpoint)\n- `image_gen_api_key`\n- `image_gen_model` (default: `gpt-image-1`)\n- `image_size` (default: `1024x1024`)\n\nFor webhook calls, endpoint path is `/webhook/image-chat-agent`.\n",
+        "height": 340,
+        "width": 520,
+        "color": 6
+      },
+      "id": "85d35e3c-c2f3-4140-b7d7-775fe31d9ca2",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-1140, 40]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Parse Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Request": {
+      "main": [
+        [
+          {
+            "node": "Mode Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mode Router": {
+      "main": [
+        [
+          {
+            "node": "Describe Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unsupported Mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Describe Agent": {
+      "main": [
+        [
+          {
+            "node": "Describe Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Agent": {
+      "main": [
+        [
+          {
+            "node": "Generate Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agent LLM (Ollama via OpenAI)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Describe Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Generate Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Describe Image": {
+      "main": [
+        [
+          {
+            "node": "Format Final Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Image": {
+      "main": [
+        [
+          {
+            "node": "Format Final Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "image-processing-and-generation-chat-agent",
+  "tags": []
+}

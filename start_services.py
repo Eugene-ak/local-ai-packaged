@@ -36,7 +36,14 @@ def clone_supabase_repo():
     else:
         print("Supabase repository already exists, updating...")
         os.chdir("supabase")
-        run_command(["git", "pull"])
+        try:
+            run_command(["git", "pull"])
+        except subprocess.CalledProcessError as e:
+            print(
+                "Warning: Could not update supabase repository via 'git pull'. "
+                "Continuing with the existing local supabase checkout."
+            )
+            print(f"Details: {e}")
         os.chdir("..")
 
 def fix_windows_line_endings():

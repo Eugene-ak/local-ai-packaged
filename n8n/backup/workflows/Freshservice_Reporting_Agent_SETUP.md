@@ -1,6 +1,6 @@
 # Freshservice Reporting Agent Setup
 
-This workflow generates two report files:
+This workflow generates two report attachments and emails them:
 - `freshservice-unresolved-YYYY-MM-DD.xlsx`
 - `freshservice-summary-YYYY-MM-DD.doc`
 
@@ -22,15 +22,19 @@ Add these to your n8n environment (for this repo, put them where your n8n servic
 
 - `FRESHSERVICE_DOMAIN` (example: `yourcompany.freshservice.com`)
 - `FRESHSERVICE_API_KEY` (Freshservice API key)
-- `FRESHSERVICE_REPORT_OUTPUT_DIR` (optional, default: `/data/shared/reports`)
+- `REPORT_EMAIL_TO` (recipient email, example: `ops-team@company.com`)
+- `REPORT_EMAIL_FROM` (sender email, example: `n8n-reports@company.com`)
 
-If you use this repository's shared mount, `/data/shared/reports` maps to `shared/reports` in the host project.
+## 3. Configure SMTP Credentials in n8n
 
-## 3. Ensure Output Folder Exists
+The workflow uses n8n's **Send Email** node, so you must configure an SMTP credential:
 
-Create the folder on the host:
-
-- `shared/reports`
+1. In n8n, open **Credentials**.
+2. Create **SMTP** credentials.
+3. Enter your SMTP host, port, username, password, and TLS settings.
+4. Save and attach this credential to both nodes:
+	- `Email Excel Report`
+	- `Email Word Summary`
 
 ## 4. Run It
 
@@ -40,7 +44,7 @@ You can trigger in two ways:
 
 ## 5. Notes and Hardening
 
-- The template currently pulls page 1 only from Freshservice search results.
-- If you have more than 100 unresolved tickets, add pagination in both HTTP nodes.
+- The workflow automatically paginates Freshservice tickets (100 per page) and keeps fetching until all pages are retrieved.
+- A safety limit of 200 pages is applied in code to avoid infinite loops.
 - You can refine the search query by team, group, priority, or requester.
-- The `.doc` output is a Word-openable text report. If you need true `.docx`, add a document generation node (or an external conversion step).
+- The `.doc` attachment is a Word-openable text report. If you need true `.docx`, add a document generation node (or an external conversion step).
