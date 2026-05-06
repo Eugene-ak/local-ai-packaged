@@ -59,7 +59,9 @@ x-init-ollama: &init-ollama
   entrypoint: /bin/sh
   command:
     - "-c"
-    - "sleep 3; OLLAMA_HOST=ollama:11434 ollama pull qwen2.5:7b-instruct-q4_K_M; OLLAMA_HOST=ollama:11434 ollama pull nomic-embed-text"
+    - "sleep 3; OLLAMA_HOST=ollama:11434 ollama pull
+      qwen2.5:7b-instruct-q4_K_M; OLLAMA_HOST=ollama:11434 ollama pull
+      nomic-embed-text"
 
 services:
   flowise:
@@ -95,6 +97,8 @@ services:
     restart: unless-stopped
     expose:
       - 5678/tcp
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
     volumes:
       - n8n_storage:/home/node/.n8n
       - ./n8n/backup:/backup
@@ -267,7 +271,8 @@ services:
     restart: always
     entrypoint: sh
     # create the 'langfuse' bucket before starting the service
-    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000"
+      --console-address ":9001" /data'
     expose:
       - 9000/tcp
       - 9001/tcp
@@ -277,7 +282,7 @@ services:
     volumes:
       - langfuse_minio_data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: [ "CMD", "mc", "ready", "local" ]
       interval: 1s
       timeout: 5s
       retries: 5
@@ -287,7 +292,7 @@ services:
     image: postgres:${POSTGRES_VERSION:-17}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 3s
       timeout: 3s
       retries: 10
@@ -321,7 +326,7 @@ services:
         max-size: "1m"
         max-file: "1"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 3s
       timeout: 10s
       retries: 10
@@ -351,11 +356,11 @@ services:
         max-file: "1"
 
   ollama-cpu:
-    profiles: ["cpu"]
+    profiles: [ "cpu" ]
     <<: *service-ollama
 
   ollama-gpu:
-    profiles: ["gpu-nvidia"]
+    profiles: [ "gpu-nvidia" ]
     <<: *service-ollama
     deploy:
       resources:
@@ -363,10 +368,10 @@ services:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [gpu]
+              capabilities: [ gpu ]
 
   ollama-gpu-amd:
-    profiles: ["gpu-amd"]
+    profiles: [ "gpu-amd" ]
     <<: *service-ollama
     image: ollama/ollama:rocm
     devices:
@@ -374,19 +379,19 @@ services:
       - "/dev/dri"
 
   ollama-pull-llama-cpu:
-    profiles: ["cpu"]
+    profiles: [ "cpu" ]
     <<: *init-ollama
     depends_on:
       - ollama-cpu
 
   ollama-pull-llama-gpu:
-    profiles: ["gpu-nvidia"]
+    profiles: [ "gpu-nvidia" ]
     <<: *init-ollama
     depends_on:
       - ollama-gpu
 
   ollama-pull-llama-gpu-amd:
-    profiles: [gpu-amd]
+    profiles: [ gpu-amd ]
     <<: *init-ollama
     image: ollama/ollama:rocm
     depends_on:
